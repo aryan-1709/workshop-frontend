@@ -3,6 +3,8 @@ import { FaEdit, FaTrash, FaEye, FaPlus, FaSearch, FaExclamationTriangle, FaFilt
 import { inventoryService } from '@/services/inventoryService';
 import { toast } from 'react-toastify';
 import PaginationComponent from "@/components/common/PaginationComponent";
+import PartScannerModal from './PartScannerModal';
+import {Button} from "@/components/ui/button";
 
 const PartList = ({ onViewDetails, onEdit, onCreate }) => {
     const [parts, setParts] = useState([]);
@@ -71,6 +73,14 @@ const PartList = ({ onViewDetails, onEdit, onCreate }) => {
         }
     };
 
+    const handlePartAction = ({ type, data }) => {
+        if (type === 'edit') {
+            onEdit(data);
+        } else if (type === 'add') {
+            onCreate(data);
+        }
+    };
+
     const getStatusColor = (quantity, minQuantity) => {
         if (quantity === 0) return 'bg-red-100 text-red-800';
         if (quantity <= minQuantity) return 'bg-yellow-100 text-yellow-800';
@@ -91,9 +101,12 @@ const PartList = ({ onViewDetails, onEdit, onCreate }) => {
         <div className="bg-card p-4 rounded-lg">
             <div className="flex justify-between items-center mb-4">
                 <h3 className="text-xl font-semibold">Parts Inventory</h3>
-                <button className="bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-2 rounded-md flex items-center" onClick={onCreate}>
-                    <FaPlus className="mr-2" /> Add Part
-                </button>
+                <div className="flex space-x-2">
+                    <PartScannerModal onPartAction={handlePartAction} />
+                    <Button className="text-md font-medium" variant="default" size="lg" onClick={onCreate}>
+                        <FaPlus className="mr-2" /> Add Part
+                    </Button>
+                </div>
             </div>
 
             <div className="flex justify-between items-center mb-4">
@@ -144,7 +157,7 @@ const PartList = ({ onViewDetails, onEdit, onCreate }) => {
                                 <td className="px-6 py-4 font-medium">{part.name}</td>
                                 <td className="px-6 py-4">{part.category}</td>
                                 <td className="px-6 py-4">{part.quantityInStock} {part.unitType}</td>
-                                <td className="px-6 py-4">₹{part.sellingPrice?.toFixed(2)}</td>
+                                <td className="px-6 py-4">₹{part.costPrice?.toFixed(2)}</td>
                                 <td className="px-6 py-4">
                                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(part.quantityInStock, part.minStockLevel)}`}>
                                         {getStatusText(part.quantityInStock, part.minStockLevel)}
