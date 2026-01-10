@@ -42,6 +42,8 @@ const JobForm = ({ job, onSave, onCancel }) => {
     const [saving, setSaving] = useState(false);
     const [currentUser, setCurrentUser] = useState(null);
     const [selectedCustomerVehicles, setSelectedCustomerVehicles] = useState(null);
+    const [page, setPage] = useState(0);
+    const [prevPart, setprevPart] = useState([]);
 
     useEffect(() => {
         const loadJobData = async () => {
@@ -55,9 +57,9 @@ const JobForm = ({ job, onSave, onCancel }) => {
                     // todo: fix it to be dynamic
                     inventoryService.getParts({
                         page: 0,
-                        size: 1000
+                        size: 5
                     }),
-                    customerService.getAll(0, 1000)
+                    customerService.getAll(0, 5)
                 ]);
 
                 const technicians = techRes?.data || [];
@@ -79,6 +81,7 @@ const JobForm = ({ job, onSave, onCancel }) => {
 
                 setTechnicians(technicians);
                 setParts(parts);
+                setprevPart(parts);
                 setCustomers(customers);
 
                 if (isEdit) {
@@ -273,6 +276,35 @@ const JobForm = ({ job, onSave, onCancel }) => {
         }
     };
 
+    const loadNextPage = async () => {
+        try {
+            const partsRes = await inventoryService.getParts({
+                page: page + 1,
+                size: 5
+            });
+            const newParts = partsRes?.data?.content || [];
+            setParts(prevPart);
+            setParts(prev => [...prev, ...newParts]);
+            setprevPart(prev => [...prev, ...newParts]);
+        } catch (error) {
+            toast.error("Failed to load more parts.");
+        }
+        setPage(prev => prev + 1);
+    }
+
+    const searchParts = async (query) => {
+        if (!query) {
+            setParts(prevPart);
+            return;
+        }
+        try {
+            const partsRes = await inventoryService.searchParts(query);
+            setParts(partsRes?.data?.content || []);
+        } catch (error) {
+            toast.error("Failed to search parts.");
+        }
+    };
+
     if (loading) return <LoadingSpinner />;
 
     // This line is no longer needed for the vehicle dropdown options
@@ -365,9 +397,11 @@ const JobForm = ({ job, onSave, onCancel }) => {
                                                 <SelectValue placeholder="Select part..." />
                                             </SelectTrigger>
                                             <SelectContent>
+                                                <Input name="partId" onChange={e => searchParts(e.target.value)} placeholder="Search part..." hidden />
                                                 {
                                                     parts.map(p => <SelectItem key={p.id} value={p.id.toString()}>[{p.partNumber}] {p.name}</SelectItem>)
                                                 }
+                                                <Button type="button" variant="link" className="w-full text-center" onClick={loadNextPage}>Load more parts...</Button>
                                             </SelectContent>
                                         </Select>
                                     ) : (
