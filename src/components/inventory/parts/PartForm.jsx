@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { FaArrowLeft, FaSave, FaTimes } from 'react-icons/fa';
+import { FaArrowLeft, FaSave, FaTimes, FaUpload } from 'react-icons/fa';
 import { inventoryService } from '@/services/inventoryService';
+import { uploadImageToCloudinary } from '@/services/uploadService';
 import { toast } from 'react-toastify';
 import PartCatalog from './PartCatalog';
 
@@ -41,18 +42,21 @@ const PartForm = ({ part, onSave, onCancel }) => {
         category: '',
         manufacturer: '',
         costPrice: '',
+        discount: '',
         sellingPrice: '',
         quantityInStock: '',
         minStockLevel: '',
         location: '',
         supplierId: '',
-        supplierName: ''
+        supplierName: '',
+        imageUrl: ''
     });
 
     const [errors, setErrors] = useState({});
     const [suppliers, setSuppliers] = useState([]);
     const [categories, setCategories] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [selectedImage, setSelectedImage] = useState(null);
 
     useEffect(() => {
         const loadInitialData = async () => {
@@ -65,7 +69,7 @@ const PartForm = ({ part, onSave, onCancel }) => {
                 ]);
 
                 if (suppliersRes.data.success) {
-                    setSuppliers(suppliersRes.data.data.content || suppliersRes.data.data);
+                    setSuppliers(suppliersRes.data.content || suppliersRes.data);
                 }
                 setCategories(categoriesRes);
             } catch (error) {
@@ -87,12 +91,14 @@ const PartForm = ({ part, onSave, onCancel }) => {
                 category: part.category || '',
                 manufacturer: part.manufacturer || '',
                 costPrice: part.costPrice || '',
+                discount: part.discount || '',
                 sellingPrice: part.sellingPrice || '',
                 quantityInStock: part.quantityInStock || '',
                 minStockLevel: part.minStockLevel || '',
                 location: part.location || '',
                 supplierId: part.supplierId || '',
-                supplierName: part.supplierName || ''
+                supplierName: part.supplierName || '',
+                imageUrl: part.imageUrl || ''
             });
         } else {
             setFormData({
@@ -102,22 +108,61 @@ const PartForm = ({ part, onSave, onCancel }) => {
                 category: '',
                 manufacturer: '',
                 costPrice: '',
+                discount: '',
                 sellingPrice: '',
                 quantityInStock: '',
                 minStockLevel: '',
                 location: '',
                 supplierId: '',
-                supplierName: ''
+                supplierName: '',
+                imageUrl: ''
             });
         }
     }, [part]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
-        if (errors[name]) {
-            setErrors(prev => ({ ...prev, [name]: '' }));
+        let updatedFormData = { ...formData, [name]: value };
+
+        // Recalculate selling price if costPrice or discount changes
+        if (name === 'costPrice' || name === 'discount') {
+            const costPrice = Number.parseFloat(updatedFormData.costPrice) || 0;
+            const discount = Number.parseFloat(updatedFormData.discount) || 0;
+            if (costPrice > 0 && discount >= 0 && discount <= 100) {
+                const discountAmount = costPrice * (discount / 100);
+                updatedFormData.sellingPrice = (costPrice - discountAmount).toFixed(2);
+            } else if (name === 'costPrice' && costPrice <= 0) { // If cost price is invalid, reset selling price
+                updatedFormData.sellingPrice = '';
+            }
         }
+        setFormData(updatedFormData); // Update formData state
+        setErrors(prev => ({ ...prev, [name]: '' })); // Clear error for the changed field
+    };
+
+    const handleFileChange = async (event) => {
+        setSelectedImage(event.target.files[0]);
+        console.log(selectedImage)
+    };
+
+    const handleUploadImage = async () => {
+        if (!selectedImage) {
+            toast.error('No image selected for upload.');
+            return;
+        }
+        try {
+            const formData = new FormData();
+            formData.append("image", selectedImage);
+            console.log("formData",formData)
+            const imageUrl = await uploadImageToCloudinary(selectedImage);
+            console.log("url", imageUrl);
+            setFormData(prev => ({ ...prev, imageUrl : imageUrl }));
+            toast.success('Image uploaded successfully!');
+        } catch (error) {
+            console.error('Error uploading image:', error);
+            toast.error('Failed to upload image.');
+        }
+        setFormData(updatedFormData);
+        setErrors(prev => ({ ...prev, [name]: '' })); // Clear error for the changed field
     };
 
     const handlePartSelect = (selectedPart) => {
@@ -211,9 +256,10 @@ const PartForm = ({ part, onSave, onCancel }) => {
                 {/* Pricing & Inventory */}
                 <div className="p-5 border border-border rounded-lg">
                     <h3 className="text-lg font-semibold mb-4">Pricing & Inventory</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <Input name="costPrice" label="Cost Price *" type="number" value={formData.costPrice} onChange={handleChange} error={errors.costPrice} step="0.01" min="0" />
-                        <Input name="sellingPrice" label="Selling Price *" type="number" value={formData.sellingPrice} onChange={handleChange} error={errors.sellingPrice} step="0.01" min="0" />
+                        <Input name="discount" label="Discount (%)" type="number" value={formData.discount} onChange={handleChange} step="0.01" min="0" />
+                        <Input name="sellingPrice" label="Selling Price *" type="number" value={formData.sellingPrice} onChange={handleChange} error={errors.sellingPrice} step="0.01" min="0" disabled={formData.discount}/>
                         <Input name="quantityInStock" label="Current Stock *" type="number" value={formData.quantityInStock} onChange={handleChange} error={errors.quantityInStock} min="0" />
                         <Input name="minStockLevel" label="Minimum Stock Level *" type="number" value={formData.minStockLevel} onChange={handleChange} error={errors.minStockLevel} min="0" />
                     </div>
@@ -231,6 +277,14 @@ const PartForm = ({ part, onSave, onCancel }) => {
                             </select>
                         </Input>
                     </div>
+                </div>
+                <div className="p-5 border border-border rounded-lg">
+                    <h3 className="text-lg font-semibold mb-4">Upload Part Image</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <Input name="imageUrl" label="Part Image" onChange={handleFileChange} error={errors.imageUrl} type='file'/>
+                        <FaUpload onClick={handleUploadImage} className="cursor-pointer mt-9" />
+                    </div>
+                    <img src={formData.imageUrl !='' ? formData.imageUrl  : 'https://gratisography.com/wp-content/uploads/2024/11/gratisography-augmented-reality-1170x780.jpg'} alt="Part" width={150} height={150} className="mt-4 rounded-md border border-border" />
                 </div>
 
                 <div className="flex justify-end space-x-4">

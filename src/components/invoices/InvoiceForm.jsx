@@ -3,6 +3,7 @@ import { FaArrowLeft, FaSave, FaTimes, FaPlus, FaTrash } from 'react-icons/fa';
 import { invoiceService } from '@/services/invoiceService';
 import { INVOICE_STATUS } from './constants/invoiceConstants';
 import { customerService } from "@/services/customerService";
+import { inventoryService } from "@/services/inventoryService";
 import { toast } from "react-toastify";
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,6 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import PartScannerButton from '../common/PartScannerButton';
 
 const InvoiceForm = ({ invoice, onSave, onCancel }) => {
     const isEdit = Boolean(invoice && invoice.id);
@@ -27,11 +30,14 @@ const InvoiceForm = ({ invoice, onSave, onCancel }) => {
         terms: '',
         status: INVOICE_STATUS.DRAFT
     });
-    const [newItem, setNewItem] = useState({ description: '', quantity: 1, unitPrice: 0, taxRate: 0 });
+    const [newItem, setNewItem] = useState({ description: '', quantity: 1, unitPrice: 0, taxRate: 0, partId: null, discount: 0, isDiscountEditable: true });
     const [errors, setErrors] = useState({});
     const [customers, setCustomers] = useState([]);
-    const [selectedCustomer, setSelectedCustomer] = useState(null); // Re-introduced
+    const [parts, setParts] = useState([]);
+    const [selectedCustomer, setSelectedCustomer] = useState(null);
     const [saving, setSaving] = useState(false);
+    const [itemType, setItemType] = useState('LABOR');
+    const [originalItemCount, setOriginalItemCount] = useState(0);
 
     useEffect(() => {
         const loadCustomers = async () => {
@@ -42,8 +48,25 @@ const InvoiceForm = ({ invoice, onSave, onCancel }) => {
                 toast.error('Failed to fetch customers');
             }
         };
+        const loadParts = async () => {
+            try {
+                const response = await inventoryService.getParts();
+                setParts(response?.data?.content || []);
+            } catch (error) {
+                toast.error('Failed to fetch parts');
+            }
+        };
         loadCustomers();
-    }, []); // Fetch customers only once on mount
+        loadParts();
+    }, []);
+
+    useEffect(() => {
+        if (itemType?.toUpperCase() === 'LABOR') {
+            setNewItem(prev => ({ ...prev, discount: 0, isDiscountEditable: false, description: '' }));
+        } else {
+            setNewItem(prev => ({ ...prev, isDiscountEditable: true, description: '' }));
+        }
+    }, [itemType]);
 
     useEffect(() => {
         if (invoice) {
@@ -73,8 +96,8 @@ const InvoiceForm = ({ invoice, onSave, onCancel }) => {
             }
 
             setFormData(initialFormData);
-
-        } else { // For new invoice
+            setOriginalItemCount(initialFormData.items.length);
+        } else {
             setFormData({
                 invoiceNumber: '',
                 customerId: '',
@@ -90,6 +113,7 @@ const InvoiceForm = ({ invoice, onSave, onCancel }) => {
                 status: INVOICE_STATUS.DRAFT
             });
             setSelectedCustomer(null);
+            setOriginalItemCount(0);
         }
     }, [invoice, customers]); // Depend on invoice and customers
 
@@ -98,12 +122,12 @@ const InvoiceForm = ({ invoice, onSave, onCancel }) => {
         setFormData(prev => ({ ...prev, [name]: value }));
         if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
     };
-    
+
     const handleSelectChange = (name, value) => {
         setFormData(prev => ({ ...prev, [name]: value }));
         if (name === 'customerId') {
             const customer = customers.find(c => c.id.toString() === value);
-            setSelectedCustomer(customer); // Set selectedCustomer here
+            setSelectedCustomer(customer);
             if (customer) {
                 setFormData(prev => ({
                     ...prev,
@@ -113,15 +137,38 @@ const InvoiceForm = ({ invoice, onSave, onCancel }) => {
                     customerAddress: customer.address
                 }));
             } else {
-                setFormData(prev => ({
-                    ...prev,
-                    customerName: '',
-                    customerEmail: '',
-                    customerPhone: '',
-                    customerAddress: ''
-                }));
+                setFormData(prev => ({ ...prev, customerName: '', customerEmail: '', customerPhone: '', customerAddress: '' }));
             }
         }
+    };
+
+    const addScannedPartItem = (partData) => {
+        const newItem = {
+            partId: partData.id,
+            partNumber: partData.partNumber,
+            description: partData.name,
+            quantity: 1,
+            unitPrice: partData.costPrice,
+            taxRate: 0, // Default tax rate
+            discount: partData.isDiscounted ? partData.discount : 0,
+            isDiscountEditable: !partData.isDiscounted,
+            itemType: 'part'
+        };
+
+        const subtotal = newItem.quantity * newItem.unitPrice;
+        const discountAmount = subtotal * ((newItem.discount || 0) / 100);
+        const subtotalAfterDiscount = subtotal - discountAmount;
+        const taxAmount = subtotalAfterDiscount * (newItem.taxRate / 100);
+        const totalPrice = subtotalAfterDiscount + taxAmount;
+
+        setFormData(prev => ({
+            ...prev,
+            items: [...prev.items, { ...newItem, totalPrice }]
+        }));
+    };
+
+    const isPartAlreadyInInvoice = (partData) => {
+        return formData.items.some(item => item.partId === partData.id);
     };
 
     const handleItemChange = (e) => {
@@ -129,15 +176,58 @@ const InvoiceForm = ({ invoice, onSave, onCancel }) => {
         setNewItem(prev => ({ ...prev, [name]: value }));
     };
 
+    const handleItemUpdate = (index, field, value) => {
+        const updatedItems = [...formData.items];
+        const itemToUpdate = { ...updatedItems[index], [field]: value };
+
+        const subtotal = itemToUpdate.quantity * itemToUpdate.unitPrice;
+        const discountAmount = subtotal * ((itemToUpdate.discount || 0) / 100);
+        const subtotalAfterDiscount = subtotal - discountAmount;
+        const taxAmount = subtotalAfterDiscount * (itemToUpdate.taxRate / 100);
+        itemToUpdate.totalPrice = subtotalAfterDiscount + taxAmount;
+
+        updatedItems[index] = itemToUpdate;
+
+        setFormData(prev => ({ ...prev, items: updatedItems }));
+    };
+
+    const handlePartSelectChange = (partId) => {
+        const part = parts.find(p => p.id.toString() === partId);
+        if (part) {
+            setNewItem(prev => ({
+                ...prev,
+                itemType: "part",
+                partId: part.id,
+                partNumber: part.partNumber,
+                description: part.name,
+                unitPrice: part.costPrice,
+                discount: part.isDiscounted ? part.discount : 0,
+                isDiscountEditable: !part.isDiscounted,
+            }));
+        }
+    };
+
     const handleAddItem = () => {
-        if (!newItem.description || newItem.quantity <= 0 || newItem.unitPrice < 0) return;
-        const itemTotal = newItem.quantity * newItem.unitPrice;
-        const taxAmount = itemTotal * (newItem.taxRate / 100);
+        if (formData.jobNumber && !formData.notes) {
+            toast.error("Please add a note explaining the reason for adding new items.");
+            return;
+        }
+        if ((itemType?.toUpperCase() === 'LABOR' && !newItem.description) || (itemType === 'part' && !newItem.partId) || newItem.quantity <= 0 || newItem.unitPrice < 0) {
+            toast.error("Please fill all item fields correctly.");
+            return;
+        }
+        
+        const subtotal = newItem.quantity * newItem.unitPrice;
+        const discountAmount = subtotal * ((newItem.discount || 0) / 100);
+        const subtotalAfterDiscount = subtotal - discountAmount;
+        const taxAmount = subtotalAfterDiscount * (newItem.taxRate / 100);
+        const totalPrice = subtotalAfterDiscount + taxAmount;
+
         setFormData(prev => ({
             ...prev,
-            items: [...prev.items, { ...newItem, totalPrice: itemTotal + taxAmount }]
+            items: [...prev.items, { ...newItem, totalPrice, itemType }]
         }));
-        setNewItem({ description: '', quantity: 1, unitPrice: 0, taxRate: 0 });
+        setNewItem({ itemType: 'LABOR', description: '', quantity: 1, unitPrice: 0, taxRate: 0, partId: null, discount: 0, isDiscountEditable: true });
     };
 
     const handleRemoveItem = (index) => {
@@ -162,6 +252,19 @@ const InvoiceForm = ({ invoice, onSave, onCancel }) => {
         } finally {
             setSaving(false);
         }
+    };
+
+    const getDiscountDisabledState = (item, index) => {
+        const isJobItem = !!formData.jobNumber && index < originalItemCount;
+        // if (!item.partId) { // Is labor
+        //     return true;
+        // }
+        if (isJobItem) {
+            // For items from a job, the discount is editable only for parts (not labor).
+            return !item.partNumber;
+        }
+        // For newly added parts, use the isDiscountEditable flag set during part selection
+        return item.isDiscountEditable === false;
     };
 
     return (
@@ -194,14 +297,8 @@ const InvoiceForm = ({ invoice, onSave, onCancel }) => {
                         <div className="space-y-2">
                             <Label>Customer *</Label>
                             <Select name="customerId" value={formData.customerId} onValueChange={val => handleSelectChange('customerId', val)} required>
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select a customer..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {
-                                        customers.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.firstName} {c.lastName}</SelectItem>)
-                                    }
-                                </SelectContent>
+                                <SelectTrigger><SelectValue placeholder="Select a customer..." /></SelectTrigger>
+                                <SelectContent>{customers.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.firstName} {c.lastName}</SelectItem>)}</SelectContent>
                             </Select>
                         </div>
                         <div className="grid md:grid-cols-3 gap-6">
@@ -213,12 +310,52 @@ const InvoiceForm = ({ invoice, onSave, onCancel }) => {
                 </Card>
 
                 <Card>
-                    <CardHeader><CardTitle>Invoice Items</CardTitle></CardHeader>
+                    <CardHeader className="flex flex-row items-center justify-between">
+                        <CardTitle>Invoice Items</CardTitle>
+                        <div className="flex items-center space-x-4">
+                            <PartScannerButton onPartScanned={addScannedPartItem} onPartAlreadyExists={isPartAlreadyInInvoice} />
+                            <RadioGroup defaultValue="LABOR" onValueChange={setItemType} className="flex items-center space-x-4">
+                                <div className="flex items-center space-x-2">
+                                    <RadioGroupItem value="LABOR" id="r-labor" />
+                                    <Label htmlFor="r-labor">Labor</Label>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                    <RadioGroupItem value="part" id="r-part" />
+                                    <Label htmlFor="r-part">Part</Label>
+                                </div>
+                            </RadioGroup>
+                        </div>
+                    </CardHeader>
                     <CardContent>
-                        <div className="grid grid-cols-12 gap-4 items-end mb-4">
-                            <div className="col-span-4 space-y-2"><Label>Description</Label><Input name="description" value={newItem.description} onChange={handleItemChange} /></div>
-                            <div className="col-span-2 space-y-2"><Label>Quantity</Label><Input type="number" name="quantity" value={newItem.quantity} onChange={handleItemChange} min="1" /></div>
-                            <div className="col-span-2 space-y-2"><Label>Unit Price</Label><Input type="number" name="unitPrice" value={newItem.unitPrice} onChange={handleItemChange} min="0" /></div>
+                        <div className="grid grid-cols-12 gap-2 items-end mb-4">
+                            {itemType?.toUpperCase() === 'LABOR' ? (
+                                <div className="col-span-5 space-y-2">
+                                    <Label>Description</Label>
+                                    <Input name="description" value={newItem.description} onChange={handleItemChange} />
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="col-span-3 space-y-2">
+                                        <Label>Part</Label>
+                                        <Select onValueChange={handlePartSelectChange}>
+                                            <SelectTrigger><SelectValue placeholder="Select a part..." /></SelectTrigger>
+                                            <SelectContent>
+                                                {parts.map(part => (
+                                                    <SelectItem key={part.id} value={part.id.toString()}>
+                                                        {part.name} ({part.partNumber}) - In Stock: {part.quantityInStock}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="col-span-2 space-y-2">
+                                        <Label>Discount (%)</Label>
+                                        <Input type="number" name="discount" value={newItem.discount} onChange={handleItemChange} min="0" max="100" disabled={!newItem.isDiscountEditable} />
+                                    </div>
+                                </>
+                            )}
+                            <div className="col-span-1 space-y-2"><Label>Quantity</Label><Input type="number" name="quantity" value={newItem.quantity} onChange={handleItemChange} min="1" /></div>
+                            <div className="col-span-2 space-y-2"><Label>Unit Price</Label><Input type="number" name="unitPrice" value={newItem.unitPrice} onChange={handleItemChange} min="0" disabled={itemType === 'part'} /></div>
                             <div className="col-span-2 space-y-2"><Label>Tax Rate (%)</Label><Input type="number" name="taxRate" value={newItem.taxRate} onChange={handleItemChange} min="0" /></div>
                             <div className="col-span-2"><Button type="button" onClick={handleAddItem} className="w-full"><FaPlus className="mr-2" /> Add</Button></div>
                         </div>
@@ -229,7 +366,8 @@ const InvoiceForm = ({ invoice, onSave, onCancel }) => {
                                         <th className="px-4 py-2 text-left">Description</th>
                                         <th className="px-4 py-2 text-right">Qty</th>
                                         <th className="px-4 py-2 text-right">Price</th>
-                                        <th className="px-4 py-2 text-right">Tax</th>
+                                        <th className="px-4 py-2 text-right">Discount (%)</th>
+                                        <th className="px-4 py-2 text-right">Tax (%)</th>
                                         <th className="px-4 py-2 text-right">Total</th>
                                         <th className="px-4 py-2 text-center">Action</th>
                                     </tr>
@@ -237,11 +375,30 @@ const InvoiceForm = ({ invoice, onSave, onCancel }) => {
                                 <tbody>
                                     {formData.items.map((item, index) => (
                                         <tr key={index} className="border-b">
-                                            <td className="px-4 py-2">{item.description}</td>
-                                            <td className="px-4 py-2 text-right">{item.quantity}</td>
+                                            <td className="px-4 py-2">{item.itemType.toUpperCase() === 'LABOR' ? item.description : `[${item.partNumber}] ${item.description}`}</td>
+                                            <td className="px-4 py-2 text-right">
+                                                <Input
+                                                    type="number"
+                                                    value={item.quantity || 1}
+                                                    onChange={(e) => handleItemUpdate(index, 'quantity', e.target.value)}
+                                                    className="w-20 text-left inline-flex"
+                                                    min="1"
+                                                />
+                                            </td>
                                             <td className="px-4 py-2 text-right">₹{Number(item.unitPrice).toFixed(2)}</td>
-                                            <td className="px-4 py-2 text-right">{item.taxRate}%</td>
+                                            <td className="px-4 py-2 text-right">
+                                                <Input
+                                                    type="number"
+                                                    value={item.discount || 0}
+                                                    onChange={(e) => handleItemUpdate(index, 'discount', e.target.value)}
+                                                    disabled={getDiscountDisabledState(item, index)}
+                                                    className="w-20 text-left inline-flex"
+                                                />
+                                            </td>
+                                            <td className="px-4 py-2 text-right">{item.taxRate}</td>
                                             <td className="px-4 py-2 text-right font-semibold">₹{Number(item.totalPrice).toFixed(2)}</td>
+                                            {/*<td className="px-4 py-2 text-center"><Button type="button" size="icon" variant="ghost" onClick={() => handleRemoveItem(index)} disabled={!!formData.jobNumber && index < originalItemCount}><FaTrash /></Button></td>*/}
+                                            {/*TODO: FOR NOW KEEPING DELETE OPTION ENABLED FROM INVOICE PAGE, would revisit later*/}
                                             <td className="px-4 py-2 text-center"><Button type="button" size="icon" variant="ghost" onClick={() => handleRemoveItem(index)}><FaTrash /></Button></td>
                                         </tr>
                                     ))}
@@ -262,6 +419,12 @@ const InvoiceForm = ({ invoice, onSave, onCancel }) => {
                 <div className="text-right text-2xl font-bold">
                     Total: ₹{calculateTotal().toFixed(2)}
                 </div>
+                <CardHeader className="flex flex-row justify-end">
+                    <div className="flex space-x-2">
+                        <Button type="button" variant="outline" onClick={onCancel}><FaTimes className="mr-2" /> Cancel</Button>
+                        <Button type="submit" disabled={saving}><FaSave className="mr-2" /> {saving ? 'Saving...' : 'Save Invoice'}</Button>
+                    </div>
+                </CardHeader>
             </form>
         </div>
     );
