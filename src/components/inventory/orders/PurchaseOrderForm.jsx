@@ -62,9 +62,17 @@ const PurchaseOrderForm = ({ order, onSave, onCancel }) => {
         if (order) {
             setFormData({
                 ...order,
+                orderNumber: order.orderNumber || '',
+                supplierId: order.supplierId || '',
                 orderDate: formatDateForInput(order.orderDate),
                 expectedDeliveryDate: formatDateForInput(order.expectedDeliveryDate),
-                items: order.items || []
+                status: order.status || 'PENDING',
+                items: (order.items || []).map(item => ({
+                    ...item,
+                    partId: item.partId || '',
+                    quantity: item.quantity || 1,
+                    unitPrice: item.unitPrice || 0
+                })),
             });
         } else {
             // Reset form for new order
@@ -128,16 +136,24 @@ const PurchaseOrderForm = ({ order, onSave, onCancel }) => {
 
         try {
             const apiData = {
-                ...formData,
+                supplierId: formData.supplierId,
+                orderDate: formData.orderDate,
+                expectedDeliveryDate: formData.expectedDeliveryDate,
+                status: formData.status,
                 totalAmount: calculateTotal(),
                 items: formData.items.map(item => ({
-                    ...item,
-                    partId: parseInt(item.partId),
-                    quantity: parseInt(item.quantity),
+                    id: item.id,
+                    partId: parseInt(item.partId, 10),
+                    quantity: parseInt(item.quantity, 10),
                     unitPrice: parseFloat(item.unitPrice),
                     totalPrice: parseFloat(item.quantity * item.unitPrice)
                 }))
             };
+
+            if (formData.id) {
+                apiData.id = formData.id;
+                apiData.orderNumber = formData.orderNumber;
+            }
             const method = formData.id ? 'PUT' : 'POST';
             const url = formData.id
                 ? `/inventory/purchase-orders/${formData.id}/items`
