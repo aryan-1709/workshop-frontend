@@ -41,6 +41,8 @@ const InvoiceForm = ({ invoice, onSave, onCancel }) => {
     const [page, setPage] = useState(0);
     const [prevParts, setPrevParts] = useState([]);
     const [query, setQuery] = useState('');
+    const [totalPages, setTotalPages] = useState(0);
+    const [pageLoading, setPageLoading] = useState(false);
 
     useEffect(() => {
         const loadCustomers = async () => {
@@ -56,6 +58,7 @@ const InvoiceForm = ({ invoice, onSave, onCancel }) => {
                 const response = await inventoryService.getParts({page: 0, size:5});
                 setParts(response?.data?.content || []);
                 setPrevParts(response?.data?.content || []);
+                setTotalPages(response?.data?.totalPages || 0);
             } catch (error) {
                 toast.error('Failed to fetch parts');
             }
@@ -289,6 +292,11 @@ const InvoiceForm = ({ invoice, onSave, onCancel }) => {
 
     
     const loadNextPage = async () => {
+        if(page === totalPages-1){
+            toast.info("No more parts to load.");
+            return;
+        }
+        setPageLoading(true);
         try {
             const partsRes = await inventoryService.getParts({
                 page: page + 1,
@@ -305,7 +313,10 @@ const InvoiceForm = ({ invoice, onSave, onCancel }) => {
             setPage(prev => prev + 1);
             console.log('Loaded parts page:', page + 1);
         } catch (error) {
+            console.log(error);
             toast.error("Failed to load more parts.");
+        } finally{
+            setPageLoading(false);
         }
     };
 
@@ -382,13 +393,15 @@ const InvoiceForm = ({ invoice, onSave, onCancel }) => {
                                         <Select onValueChange={handlePartSelectChange}>
                                             <SelectTrigger><SelectValue placeholder="Select a part..." /></SelectTrigger>
                                             <SelectContent>
-                                                <Input name="partId" onChange={(e) => setQuery(e.target.value)} placeholder="Search part..." hidden />
+                                                <Input name="partId" onChange={(e) => setQuery(e.target.value)} placeholder="Search part..." onKeyDown={(e) => e.stopPropagation()} />
                                                 {parts.map(part => (
                                                     <SelectItem key={part.id} value={part.id.toString()}>
                                                         {part.name} ({part.partNumber}) - In Stock: {part.quantityInStock}
                                                     </SelectItem>
                                                 ))}
-                                                <Button type="button" variant="link" className="w-full text-center" onClick={loadNextPage}>Load More</Button>
+                                                <div className={`${(page === totalPages-1) || (pageLoading) ? 'cursor-not-allowed' : ''}`}>
+                                                    <Button type="button" variant="link" className={`w-full text-center ${(page === totalPages-1) || (pageLoading) ? 'cursor-not-allowed' : ''}`} disabled={(page === totalPages-1) || pageLoading} onClick={loadNextPage}>Load More</Button>
+                                                </div>
                                             </SelectContent>
                                         </Select>
                                     </div>

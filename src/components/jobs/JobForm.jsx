@@ -45,6 +45,8 @@ const JobForm = ({ job, onSave, onCancel }) => {
     const [page, setPage] = useState(0);
     const [prevParts, setPrevParts] = useState([]);
     const [query, setQuery] = useState('');
+    const [totalPages, setTotalPages] = useState(0);
+    const [pageLoading, setPageLoading] = useState(false);
 
     useEffect(() => {
         const loadJobData = async () => {
@@ -66,6 +68,7 @@ const JobForm = ({ job, onSave, onCancel }) => {
                 const technicians = techRes?.data || [];
                 const parts = partsRes?.data?.content || [];
                 let customers = custRes?.data?.content || [];
+                setTotalPages(partsRes?.data?.totalPages || 0);
 
                 if (isEdit && job.customerId) {
                     const detailedCustomerRes = await customerService.getWithVehicles(job.customerId);
@@ -294,6 +297,11 @@ const JobForm = ({ job, onSave, onCancel }) => {
     };
 
     const loadNextPage = async () => {
+        if(page === totalPages-1){
+            toast.info("No more parts to load.");
+            return;
+        }
+        setPageLoading(true);
         try {
             const partsRes = await inventoryService.getParts({
                 page: page + 1,
@@ -310,7 +318,10 @@ const JobForm = ({ job, onSave, onCancel }) => {
             setPage(prev => prev + 1);
             console.log('Loaded parts page:', page + 1);
         } catch (error) {
+            console.log(error);
             toast.error("Failed to load more parts.");
+        } finally{
+            setPageLoading(false);
         }
     };
 
@@ -410,7 +421,9 @@ const JobForm = ({ job, onSave, onCancel }) => {
                                                 {
                                                     parts.map(p => <SelectItem key={p.id} value={p.id.toString()}>[{p.partNumber}] {p.name}</SelectItem>)
                                                 }
-                                                <Button type="button" variant="link" className="w-full text-center" onClick={loadNextPage}>Load More</Button>
+                                                <div className={`${(page === totalPages-1) || (pageLoading) ? 'cursor-not-allowed' : ''}`}>
+                                                    <Button type="button" variant="link" className={`w-full text-center ${(page === totalPages-1) || (pageLoading) ? 'cursor-not-allowed' : ''}`} disabled={(page === totalPages-1) || pageLoading} onClick={loadNextPage}>Load More</Button>
+                                                </div>
                                             </SelectContent>
                                         </Select>
                                     ) : (
